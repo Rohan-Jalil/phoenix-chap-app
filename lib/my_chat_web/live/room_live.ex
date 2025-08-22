@@ -1,38 +1,49 @@
 defmodule MyChatWeb.RoomLive do
   use MyChatWeb, :live_view
   alias MyChat.Chat
+  alias MyChat.Accounts
 
-  def mount(_params, _session, socket) do
-    room = "lobby"
-    if connected?(socket), do: Chat.subscribe(room)
+  @impl true
+  def mount(_params, %{"user_token" => user_token} = _session, socket) do
+    # Load the logged-in user
+    user = Accounts.get_user_by_session_token(user_token)
 
-    msgs = Chat.list_messages(room)
-    username = "user" <> Integer.to_string(Enum.random(1000..9999))
+    if connected?(socket), do: Chat.subscribe("lobby")
+
+    messages = Chat.list_messages("lobby")
 
     {:ok,
       socket
-      |> assign(room: room, username: username)
-      |> stream(:messages, msgs)}
+      |> assign(:room, "lobby")
+      |> assign(:username, user.email)
+      |> stream(:messages, messages)}
   end
 
-  def handle_event("send", %{"username" => u, "body" => b}, socket) do
-    _ = Chat.create_message(%{username: u, body: b, room: socket.assigns.room})
-    {:noreply, assign(socket, :username, u)}
+  @impl true
+  def handle_event("send", %{"body" => body}, socket) do
+    username = socket.assigns.username
+    room = socket.assigns.room
+
+    # Create and broadcast message
+    _ = Chat.create_message(%{username: username, body: body, room: room})
+
+    {:noreply, socket}
   end
 
+  @impl true
   def handle_info({:new_message, msg}, socket) do
     {:noreply, stream_insert(socket, :messages, msg)}
   end
 
-  # tiny helper for timestamps if you want it later
+  # optional helper for timestamp display
   defp hhmm(%NaiveDateTime{} = dt), do: Calendar.strftime(dt, "%H:%M")
   defp hhmm(_), do: ""
 
-
+  @impl true
   def render(assigns) do
     ~H"""
     <div class="max-w-2xl mx-auto p-6 space-y-4">
-      <h1 class="text-2xl font-bold">Simple Chat — <span class="font-mono"><%= @room %></span></h1>
+      <h1 class="text-2xl font-bold">Chat Room — <span class="font-mono"><%= @room %></span></h1>
 
       <div id="messages"
            phx-update="stream"
@@ -40,18 +51,16 @@ defmodule MyChatWeb.RoomLive do
         <div :for={{id, m} <- @streams.messages} id={id} class="text-sm">
           <span class="font-semibold"><%= m.username %></span>:
           <span><%= m.body %></span>
+          <span class="text-gray-400 text-xs ml-2"><%= hhmm(m.inserted_at) %></span>
         </div>
       </div>
 
       <form phx-submit="send" class="flex gap-2">
-        <input type="text" name="username" value={@username} required
-               class="flex-1 border rounded p-2" placeholder="Your name" />
         <input type="text" name="body" required autofocus
-               class="flex-[2] border rounded p-2" placeholder="Type a message…" />
+               class="flex-1 border rounded p-2" placeholder="Type a message…" />
         <button type="submit" class="border rounded px-4">Send</button>
       </form>
     </div>
     """
   end
 end
-
